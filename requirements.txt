@@ -15,7 +15,6 @@ networkx==2.1
 numpy==1.14.2
 opencv-contrib-python==3.4.0.12
 Pillow==5.0.0
-pkg-resources==0.0.0
 protobuf==3.5.2.post1
 pyparsing==2.2.0
 python-dateutil==2.7.2
