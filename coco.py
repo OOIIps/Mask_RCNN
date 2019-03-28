@@ -85,8 +85,7 @@ class BagsDataset(utils.Dataset):
         return_coco: If True, returns the COCO object.
         auto_download: Automatically download and unzip MS-COCO images and annotations
         """
-
-        import json 
+        import json
         with open(json_path, 'r') as f:
             dataset = json.load(f)
         
@@ -307,9 +306,10 @@ class BagsConfig(Config):
     USE_MINI_MASK = True
     MAX_GT_INSTANCES = 500
 
-    def __init__(self, n, m=1):
+    def __init__(self, n, m=1, nsteps=200):
         self.NUM_CLASSES = 1 + n 
         self.GPU_COUNT = m
+        self.STEPS_PER_EPOCH=nsteps
         super().__init__()
 
 if __name__ == '__main__':
@@ -338,12 +338,40 @@ if __name__ == '__main__':
     parser.add_argument('--augment', required=False, action='store_true', help='add augmentations')
     parser.add_argument('--stage', required=True, default=1, type=int, help='Choose stage of training (1-heads, 2-4+, 3-full)')
     parser.add_argument('--num_gpus', default=1, type=int, help='Number of GPUs available')
+    parser.add_argument('--relpath', action='store_true', help='Using relative paths in dataset JSON file')
+    parser.add_argument('--nsteps', help='Number of steps per epoch', default=200, type=int)
     args = parser.parse_args()
+    if args.relpath:
+        try:
+            os.mkdir('jsons')
+        except Exception:
+            pass
+        
+        addon = os.path.dirname(os.path.abspath(args.json_file))
+        temp_path = os.path.join('jsons', os.path.basename(args.json_file))
+
+        if not os.path.exists(temp_path):
+            with open(args.json_file, 'r') as f:
+                obj = json.load(f)
+
+            for idx in range(len(obj['images'])):
+                obj['images'][idx]['file_name'] = os.path.join(addon, obj['images'][idx]['file_name'])
     
+            with open(temp_path, 'w') as f:
+                json.dump(obj, f)
+        json_f = temp_path
+    else:
+        json_f = args.json_file
+	
     if args.augment:
-        aug = iaa.OneOf([iaa.CropAndPad(percent=(-0.5, 0.5)), iaa.Fliplr(0.5), iaa.Affine(translate_percent={"x": (-0.4, 0.4), "y": (-0.4, 0.4)})])
+        aug = iaa.OneOf([iaa.Fliplr(0.5), iaa.Affine(rotate=(-30, 30)),
+                            iaa.CropAndPad(100), iaa.ElasticTransformation(sigma=5.0), 
+                            iaa.Affine(translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)})])
+        augment=True # GAMMA CORRECTION 
     else:
         aug = None
+        augment=False # GAMMA CORRECTION
+
     ############################################################
     #  Configurations
     ############################################################
@@ -353,7 +381,7 @@ if __name__ == '__main__':
     
     # Configurations
     if args.command == "train":
-        config = BagsConfig(len(obj['classes']), args.num_gpus)
+        config = BagsConfig(len(obj['classes']), args.num_gpus, args.nsteps)
     else:
         class InferenceConfig():
             # Set batch size to 1 since we'll be running inference on
@@ -388,12 +416,12 @@ if __name__ == '__main__':
         # Training dataset. Use the training set and 35K from the
         # validation set, as as in the Mask RCNN paper.
         dataset_train = BagsDataset(len(obj['classes']))
-        dataset_train.load_bags(args.json_file)
+        dataset_train.load_bags(json_f)
         dataset_train.prepare()
 
         # Validation dataset
         dataset_val = BagsDataset(len(obj['classes']))
-        dataset_val.load_bags(args.json_file, "val")
+        dataset_val.load_bags(json_f, "val")
         dataset_val.prepare()
         
         temps = 30

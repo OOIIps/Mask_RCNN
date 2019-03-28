@@ -7,6 +7,7 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
+import cv2
 import os
 import sys
 import glob
@@ -30,7 +31,6 @@ import keras.engine as KE
 import keras.models as KM
 
 import utils
-
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
 assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
@@ -448,8 +448,6 @@ class PyramidROIAlign(KE.Layer):
         ix = tf.gather(box_to_level[:, 2], ix)
         pooled = tf.gather(pooled, ix)
         
-        #print (pooled.get_shape().as_list())
-
         # Re-add the batch dimension
         pooled = tf.expand_dims(pooled, 0)
         return pooled
@@ -706,6 +704,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     """
     # Class IDs per ROI
     class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)
+
     # Class probability of the top class of each ROI
     indices = tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)
     class_scores = tf.gather_nd(probs, indices)
@@ -771,6 +770,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     class_scores_keep = tf.gather(class_scores, keep)
     num_keep = tf.minimum(tf.shape(class_scores_keep)[0], roi_count)
     top_ids = tf.nn.top_k(class_scores_keep, k=num_keep, sorted=True)[1]
+
     keep = tf.gather(keep, top_ids)
 
     # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
@@ -1172,8 +1172,6 @@ def mrcnn_color_gmm_loss_graph(input_image, target_bbox, target_class_ids, pred_
 
     tf_gmm = tf.contrib.factorization.GMM(6, model_dir='logs/color_gmm')
 
-    print (target_bbox.get_shape().as_list()[0], pred_bbox.get_shape().as_list()[0])
-    
     return tf.zeros(1)
     
 
@@ -1257,11 +1255,15 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
 
     # Random horizontal flips.
     # TODO: will be removed in a future update in favor of augmentation
-    if augment:
-        logging.warning("'augment' is depricated. Use 'augmentation' instead.")
-        if random.randint(0, 1):
-            image = np.fliplr(image)
-            mask = np.fliplr(mask)
+    if augment and augmentation:
+        def gamma_correction(image, gamma=1.0):
+            inv = 1.0 / gamma
+            table = np.array([((i / 255.0) ** inv) * 255 for i in np.arange(0, 256)])
+            return cv2.LUT(image.astype(np.uint8), table.astype(np.uint8))
+
+        flag = np.random.randint(5)
+        if not flag:
+            image = gamma_correction(image, np.random.uniform(0.6, 1.3))
 
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
@@ -1862,6 +1864,7 @@ class MaskRCNN():
         self.model_dir = model_dir
         self.set_log_dir()
         self.keras_model = self.build(mode=mode, config=config)
+        self.schedfactor = 5
 
     def build(self, mode, config):
         """Build Mask R-CNN architecture.
@@ -2071,7 +2074,7 @@ class MaskRCNN():
                                               config.MASK_POOL_SIZE,
                                               config.NUM_CLASSES,
                                               train_bn=config.TRAIN_BN)
-
+            
             model = KM.Model([input_image, input_image_meta],
                              [detections, mrcnn_class, mrcnn_bbox,
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
@@ -2146,6 +2149,13 @@ class MaskRCNN():
 
         # Update the log directory
         self.set_log_dir(filepath)
+
+    def schedule(self, epoch):
+        
+        power = epoch // self.schedfactor
+        #if epoch%self.schedfactor == 0 and epoch!=0 and self.schedfactor != 1:
+        #    self.schedfactor = max(int(self.schedfactor/1.1), 1)
+        return self.config.LEARNING_RATE*np.power(0.75, power)
 
     def get_imagenet_weights(self):
         """Downloads ImageNet trained weights from Keras.
@@ -2273,7 +2283,7 @@ class MaskRCNN():
             "*epoch*", "{epoch:04d}")
 
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
-              augmentation=None):
+              augment=None, augmentation=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -2319,17 +2329,18 @@ class MaskRCNN():
 
         # Data generators
         train_generator = data_generator(train_dataset, self.config, shuffle=True,
-                                         augmentation=augmentation,
+                                         augmentation=augmentation, augment=augment, 
                                          batch_size=self.config.BATCH_SIZE)
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
-                                       batch_size=self.config.BATCH_SIZE)
+                                       batch_size=self.config.BATCH_SIZE*10)
 
         # Callbacks
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
                                         histogram_freq=0, write_graph=True, write_images=False),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
+                                            verbose=0, save_weights_only=True, save_best_only=True, mode=min, monitor='val_mrcnn_class_loss'),
+            keras.callbacks.LearningRateScheduler(self.schedule, verbose=1)
         ]
 
         # Train
@@ -2356,7 +2367,7 @@ class MaskRCNN():
             validation_steps=self.config.VALIDATION_STEPS,
             max_queue_size=100,
             workers=workers,
-            use_multiprocessing=False,
+            use_multiprocessing=True,
         )
         self.epoch = max(self.epoch, epochs)
 
@@ -2503,6 +2514,7 @@ class MaskRCNN():
                 "class_ids": final_class_ids,
                 "scores": final_scores,
                 "masks": final_masks,
+                "class_scores": mrcnn_class
             })
         return results
 
