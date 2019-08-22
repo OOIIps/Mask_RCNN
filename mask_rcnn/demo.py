@@ -53,51 +53,6 @@ def iou_filter(bboxes, cls, scores, iou_threshold = 0.5):
                 inter = False
         return rboxes, rlabels, rscores
 
-def inter_class_NMS(bboxes, cls, scores, masks, threshold=0.7):
-        
-    N = bboxes.shape[0]
-    
-    selected = []
-    
-    for i in range(N):
-        
-        ymin1, xmin1, ymax1, xmax1 = bboxes[i]
-
-        rectangle = np.ones((xmax1-xmin1, ymax1-ymin1))
-        
-        total_area = np.sum(rectangle)
-
-        for j in range(N):
-            if i==j:
-                continue
-            else:
-                ymin2, xmin2, ymax2, xmax2 = bboxes[j]
-                
-                if overlap(bboxes[i], bboxes[j]):
-                    xo, yo, Xo, Yo = max([xmin1, xmin2]), max([ymin1,ymin2]), min([xmax1,xmax2]), min([ymax1,ymax2])
-                    
-                    # Normalize coordinates for overlap rectangle
-                    xo -= xmin1
-                    yo -= ymin1
-                    Xo -= xmin1
-                    Yo -= ymin1
-
-                    # Eliminate area of overlap from area calculation
-                    rectangle[xo:Xo, yo:Yo] = 0
-      
-        non_intersect_area = np.sum(rectangle)
-        intersect_area = total_area - non_intersect_area
-        
-        iom = float(intersect_area) / (non_intersect_area + 1e-10)
-
-        if iom < threshold:
-            selected.append(i)
-    
-    if masks is not None:
-        return bboxes[selected], cls[selected], scores[selected], masks[:,:,selected]
-    else:
-        return bboxes[selected], cls[selected], scores[selected], None
-
 # Find if 2 rectangles overlap using SEPARATING AXIS THEOREM
 def overlap(box1, box2):
 
@@ -236,49 +191,8 @@ if __name__=='__main__':
         visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'], 
                                     class_names, r['scores'], save=args.save_demo)
         
-        r['rois'], r['class_ids'], r['scores'], r['masks'] = \
-                inter_class_NMS(r['rois'], r['class_ids'], r['scores'], r['masks'])        
-
         t = 'image' if args.image is not None else 'video'
        
-        '''
-        #print (r['rois'], r['class_ids'])
-        
-        threshold = 75
-        
-        h_prev, h_prev2, remove = None, None, []
-        for i,x in enumerate(r['class_ids']):
-            if x==17: # Rhythm journal
-                s = r['rois'][i]
-                h,w = s[2]-s[0], s[3]-s[1]
-                if h_prev is None:
-                    h_prev, w_prev, i_prev = h,w,i
-                    
-                if abs(h-h_prev) < threshold and abs(w-w_prev) < threshold:
-                    continue
-                else:
-                    if h_prev2 is None:
-                        h_prev2, w_prev2, i_prev2 = h, w, i 
-                    else:                   
-                        if abs(h-h_prev2) < threshold and abs(w-w_prev2) < threshold:
-                            h_prev, w_prev, i_prev = h_prev2, w_prev2, i_prev2
-                        else:
-                            remove.append(i)
-        for r in list(reversed(remove)):
-            print ("Deleted row ", r)
-            r['class_ids'] = np.delete(r['class_ids'], (r), axis=0)
-            r['rois'] = np.delete(r['rois'], (r), axis=0)
-            r['masks'] = np.delete(r['masks'], (r), axis=0)
-            r['scores'] = np.delete(r['scores'], (r), axis=0)
-        
-        if h_prev2 is not None:
-            print ("Deleted row ", i_prev2)
-            r['class_ids'] = np.delete(r['class_ids'], (i_prev2), axis=0)
-            r['rois'] = np.delete(r['rois'], (i_prev2), axis=0)
-            r['masks'] = np.delete(r['masks'], (i_prev2), axis=0)
-            r['scores'] = np.delete(r['scores'], (i_prev2), axis=0)
-        '''
-
         if not args.save_demo:
             c = cv2.waitKey()
             if args.image_dir is not None:

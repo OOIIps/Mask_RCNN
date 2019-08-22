@@ -95,7 +95,6 @@ class TrainDataset(utils.Dataset):
             dataset = json.load(f)
         
         NAME = "bags" if name is None else name 
-        print (NAME)
         # Add classes
         for i, cls in enumerate(sorted(dataset['classes'])):
             self.add_class(NAME, i+1, cls)
@@ -183,7 +182,7 @@ class TrainDataset(utils.Dataset):
         if isinstance(segm, list):
             # polygon -- a single object might consist of multiple parts
             # we merge all parts into one mask rle code
-            rles = maskUtils.frPyObjects(segm, height, width)
+            rles = maskUtils.frPyObjects([segm])
             rle = maskUtils.merge(rles)
         elif isinstance(segm['counts'], list):
             # uncompressed RLE

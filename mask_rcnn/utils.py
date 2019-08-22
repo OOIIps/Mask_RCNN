@@ -20,10 +20,10 @@ import skimage.transform
 import urllib.request
 import shutil
 import warnings
+import cv2
 
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
-
 
 ############################################################
 #  Bounding Boxes
@@ -358,7 +358,8 @@ class Dataset(object):
         """Load the specified image and return a [H,W,3] Numpy array.
         """
         # Load image
-        image = skimage.io.imread(self.image_info[image_id]['path'])
+        image = cv2.imread(self.image_info[image_id]['path'])
+
         # If grayscale. Convert to RGB for consistency.
         if image.ndim != 3:
             image = skimage.color.gray2rgb(image)
@@ -384,8 +385,7 @@ class Dataset(object):
         mask = np.empty([0, 0, 0])
         class_ids = np.empty([0], np.int32)
         return mask, class_ids
-
-
+   
 def resize_image(image, min_dim=None, max_dim=None, mode="square"):
     """Resizes an image keeping the aspect ratio unchanged.
 
